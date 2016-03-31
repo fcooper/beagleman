@@ -10,32 +10,52 @@ import time
 
 from pocketsphinx.pocketsphinx import *
 from sphinxbase.sphinxbase import *
+from StringIO import StringIO
 from creds import *
 from threading import Thread
 from requests.packages.urllib3.exceptions import *
 
 requests.packages.urllib3.disable_warnings(InsecurePlatformWarning)
 
-modeldir = "/root/pocketsphinx/model/"
-datadir = "/root/pocketsphinx/test/data"
+# ------ Start User configuration settings --------
+sphinx_data_path = "/root/pocketsphinx/"
+modeldir = sphinx_data_path+"/model/"
+datadir = sphinx_data_path+"/test/data"
 
-filename="/root/tmp/myfile.wav"
-filename_raw="/root/tmp/myfile.pcm"
+recording_file_path = "/root/tmp/"
+filename=recording_file_path+"/myfile.wav"
+filename_raw=recording_file_path+"/myfile.pcm"
 
-token = "<Wit AI Token>"
+# Personalize the robot :)
+username = "Franklin"
 
-authentication_string = "Authorization: Bearer "+token
+# Trigger phrase. Pick a phrase that is easy to save repeatedly the SAME way
+# seems by default a single syllable word is better
+trigger_phrase = "dog"
 
-# Create a decoder with certain model
+wit_token = "<Wit AI Token>"
+
+# ----- End User Configuration -----
+
+wit_ai_authorization = "Authorization: Bearer "+wit_token
+
+# PocketSphinx configuration
 config = Decoder.default_config()
+
+# Set recognition model to US
 config.set_string('-hmm', os.path.join(modeldir, 'en-us/en-us'))
 config.set_string('-dict', os.path.join(modeldir, 'en-us/cmudict-en-us.dict'))
-config.set_string('-keyphrase', 'robot')
-config.set_float('-kws_threshold',5)
+
+#Specify recognition key phrase
+config.set_string('-keyphrase', trigger_phrase)
+config.set_float('-kws_threshold',3)
+
+# Hide the VERY verbose logging information
 config.set_string('-logfn', '/dev/null')
 
 path = os.path.realpath(__file__).rstrip(os.path.basename(__file__))
 
+# Read microphone at 16 kHz. Data is signed 16 bit little endian format.
 inp = alsaaudio.PCM(alsaaudio.PCM_CAPTURE)
 inp.setchannels(1)
 inp.setrate(16000)
@@ -43,27 +63,30 @@ inp.setformat(alsaaudio.PCM_FORMAT_S16_LE)
 inp.setperiodsize(1024)
 
 token = None
-target = None
+recording_file = None
 
 start = time.time()
-said_phrase = False
-facebook_received = False
+
+# Determine if trigger word/phrase has been detected
+record_audio = False
+wit_ai_received = False
 
 # Process audio chunk by chunk. On keyword detected perform action and restart search
 decoder = Decoder(config)
 decoder.start_utt()
 
-#requests.packages.urllib3.disable_warnings(SNIMissingWarning)
+# Using slightly outdated urlib3 software by default. But disable harmless warning
 requests.packages.urllib3.disable_warnings(InsecurePlatformWarning)
 
-# Alexa code based on awesome code from AlexaPi
+# All Alexa code based on awesome code from AlexaPi
 # https://github.com/sammachin/AlexaPi
 
+# Verify that the user is connected to the internet
 def internet_on():
 	print "Checking Internet Connection"
 	try:
 		r =requests.get('https://api.amazon.com/auth/o2/token')
-	print "Connection OK"
+	        print "Connection OK"
 		return True
 	except:
 		print "Connection Failed"
@@ -88,6 +111,7 @@ def gettoken():
 def alexa():
 	url = 'https://access-alexa-na.amazon.com/v1/avs/speechrecognizer/recognize'
 	headers = {'Authorization' : 'Bearer %s' % gettoken()}
+        # Set parameters to Alexa request for our audio recording
 	d = {
    		"messageHeader": {
        		"deviceContext": [
@@ -109,6 +133,7 @@ def alexa():
    		}
 	}
 
+        # Send our recording audio to Alexa
 	with open(path+"myfile.pcm") as inf:
 		files = [
 				('file', ('request', json.dumps(d), 'application/json; charset=UTF-8')),
@@ -126,6 +151,8 @@ def alexa():
 		for d in data:
 			if (len(d) >= 1024):
 				audio = d.split('\r\n\r\n')[1].rstrip('--')
+
+                # Write response audio to response.mp3
 		with open(path+"response.mp3", 'wb') as f:
 			f.write(audio)
 	else:
@@ -137,86 +164,127 @@ def offline_speak(string):
 
 # Code based on examples from Facebook's wit.ai
 # https://wit.ai/docs/http/20141022
-def facebook():
-	global facebook_received
+def handle_intent(response):
+    if response["outcomes"][0]["intent"] == "alarm":
+        offline_speak("Your alarm has been set")
+        return True
+
+
+    return False
+
+def wit_ai():
+	global wit_ai_received
+
+        #Make an HTTP request via python curl using our saved audio recording
+        #Api document https://wit.ai/docs/http/20141022
 	output = StringIO()
 	c = pycurl.Curl()
+
 	c.setopt(c.URL, 'https://api.wit.ai/speech?v=20141022')
-	c.setopt(c.HTTPHEADER, [authentication_string,
+
+        # Send authorization string along with indicate that we are sending audio
+	c.setopt(c.HTTPHEADER, [wit_ai_authorization,
 						'Content-Type: audio/wav'])
 	c.setopt(c.FOLLOWLOCATION, True)
+
+        # Specify that we are doing a POST request
 	c.setopt(pycurl.POST, 1)
+
+        # Get size of our audio file
 	filesize = os.path.getsize(filename)
 	c.setopt(c.POSTFIELDSIZE, filesize)
+
+        # Pass a function that will read the audio file
 	fin = open(filename, 'rb')
 	c.setopt(c.READFUNCTION, fin.read)
 
 	c.setopt(c.WRITEFUNCTION, output.write)
+
+        # Ignore SSL verification
 	c.setopt(pycurl.SSL_VERIFYPEER, 0)   
 	c.setopt(pycurl.SSL_VERIFYHOST, 0)
+
+        # Send our Web Service request
 	c.perform()
 
 	c.close()
 
-	value =  output.getvalue()
+        # Get our response
+	response =  json.loads(output.getvalue())
 
-	the =  json.loads(value)
+	wit_ai_received = False
+   
+        # Check if we got an error
+	if 'error' not in response.keys():
+                print "Wit.ai believe the audio said: ", the["_text"]
 
-	facebook_received = False
-    
-	if 'error' not in the.keys():
-		print the["_text"]
-		print the["outcomes"][0]["intent"]
+                # See if our code handles the specified intent
+		if response["outcomes"][0]["intent"] == "UNKNOWN" or not handle_intent(response["outcomes"]):
+                    print "Debug: Unrecognized Wit.ai intent. Let Alexa handle it"
+                else:
+			wit_ai_received = True
+        else:
+            print "Debug: Wit.ai returned an error"
 
-		if the["outcomes"][0]["intent"] != "UNKNOWN":
-			offline_speak("Your alarm has been set")
-			facebook_received = True
-
-
-def service():
-	global facebook_received
+def web_service():
+	global wit_ai_received
 
 	# Call the two speech recognitions services in parallel
 	alexa_thread = Thread( target=alexa, args=() )
-	facebook_thread = Thread( target=facebook, args=( ) )
+	wit_ai_thread = Thread( target=wit_ai, args=( ) )
 
 	alexa_thread.start()
-	facebook_thread.start()
-	facebook_thread.join()
+	wit_ai_thread.start()
 
-	if facebook_received != True:
-		os.system('play  -c 1 -r 24000 -q {}response.mp3  > /dev/null 2>&1'.format(path))
+        # Prioritize a response from Wit.ai
+	wit_ai_thread.join()
+
+        # See if Wit.ai code handled response
+	if wit_ai_received != True:
+                # Wait until Alexa code handles response
 		alexa_thread.join()
-		time.sleep(1)
-		offline_speak("Hello Franklin, Ask me another question")
+
+                # Play Alexa response
+		os.system('play  -c 1 -r 24000 -q {}response.mp3  > /dev/null 2>&1'.format(path))
+		time.sleep(.5)
 		
 
 while internet_on() == False:
 	print "."
 
-offline_speak("Hello Franklin, Ask me any question")
+offline_speak("Hello "+username+", Ask me any question")
 
 while True:
 	try:
 		# Read from microphone
 		l,buf = inp.read()
 	except:
+                # Hopefully we read fast enough to avoid overflow errors
 		print "Debug: Overflow"
 		continue
 
-	if buf and said_phrase == False:
+        #Process microphone audio via PocketSphinx only when trigger word
+        # hasn't been detected
+	if buf and record_audio == False:
 		decoder.process_raw(buf, False, False)
 
 	# Detect if keyword/trigger word was said
-	if said_phrase == False and decoder.hyp() != None:
-		said_phrase = True
+	if record_audio == False and decoder.hyp() != None:
+                # Trigger phrase has been detected
+		record_audio = True
 		start = time.time()
+
+                # To avoid overflows close the microphone connection
 		inp.close()
 
-		target = open("myfile.pcm", 'w')
-		target.truncate()
+                # Open file that will be used to save raw micrphone recording
+		recording_file = open("myfile.pcm", 'w')
+		recording_file.truncate()
 
-		os.system('play  -c 1 -r 24000 -q {}alert.mp3  > /dev/null 2>&1'.format(path))
+                # Indicate that the system is listening to request
+                offline_speak("Yes")
+
+                # Reenable reading microphone raw data
 		inp = alsaaudio.PCM(alsaaudio.PCM_CAPTURE)
 		inp.setchannels(1)
 		inp.setrate(16000)
@@ -227,16 +295,23 @@ while True:
 
 
 	# Only write if we are recording
-	if said_phrase == True:
-		target.write(buf)
+	if record_audio == True:
+		recording_file.write(buf)
 
 	# Stop recording after 5 seconds
-	if said_phrase == True and time.time() - start > 5:
+	if record_audio == True and time.time() - start > 5:
 		print ("Debug: End recording")
-		said_phrase = False
+		record_audio = False
 
-		target.close()
+                # Close file we are saving microphone data to
+		recording_file.close()
+
+                # Convert raw PCM to wav file (includes audio headers)
 		os.system("sox -t raw -r 16000 -e signed -b 16 -c 1 myfile.pcm myfile.wav && sync");
-		service()
+
+                # Send recording to our speech recognition web services
+		web_service()
+
+                # Now that request is handled restart audio decoding
 		decoder.end_utt()
 		decoder.start_utt()
