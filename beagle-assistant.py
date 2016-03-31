@@ -8,13 +8,15 @@ import re
 import sys
 import time
 
+from creds import *
+from hdc1000 import getTemperature
 from pocketsphinx.pocketsphinx import *
+from requests.packages.urllib3.exceptions import *
 from sphinxbase.sphinxbase import *
 from StringIO import StringIO
-from creds import *
 from threading import Thread
-from requests.packages.urllib3.exceptions import *
 
+# Avoid warning about insure request
 requests.packages.urllib3.disable_warnings(InsecurePlatformWarning)
 
 # ------ Start User configuration settings --------
@@ -152,7 +154,7 @@ def alexa():
 			if (len(d) >= 1024):
 				audio = d.split('\r\n\r\n')[1].rstrip('--')
 
-                # Write response audio to response.mp3
+                # Write response audio to response.mp3 may or may not be played later
 		with open(path+"response.mp3", 'wb') as f:
 			f.write(audio)
 	else:
@@ -165,10 +167,22 @@ def offline_speak(string):
 # Code based on examples from Facebook's wit.ai
 # https://wit.ai/docs/http/20141022
 def handle_intent(response):
-    if response["outcomes"][0]["intent"] == "alarm":
+    intent = response["outcomes"][0]["intent"]
+
+    if intent == "alarm":
         offline_speak("Your alarm has been set")
         return True
 
+    elif intent == "seeedstudio"
+        offline_speak("Seeed Studio is located in Shenzhen, China")
+        return True
+
+    elif intent == "temperature":
+        offline_speak("Measuring room temperature")
+        temp = getTemperature()
+        temp = "{0:.2f}".format(temp)
+        offline_speak("The current room temperature is "+temp+" degrees fahrenheit")
+        return True
 
     return False
 
