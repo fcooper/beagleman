@@ -24,7 +24,7 @@ sphinx_data_path = "/root/pocketsphinx/"
 modeldir = sphinx_data_path+"/model/"
 datadir = sphinx_data_path+"/test/data"
 
-recording_file_path = "/root/tmp/"
+recording_file_path = "/root/beagleman/"
 filename=recording_file_path+"/myfile.wav"
 filename_raw=recording_file_path+"/myfile.pcm"
 
@@ -136,7 +136,7 @@ def alexa():
 	}
 
         # Send our recording audio to Alexa
-	with open(path+"myfile.pcm") as inf:
+	with open(filename_raw) as inf:
 		files = [
 				('file', ('request', json.dumps(d), 'application/json; charset=UTF-8')),
 				('file', ('audio', inf, 'audio/L16; rate=44100; channels=1'))
@@ -167,13 +167,13 @@ def offline_speak(string):
 # Code based on examples from Facebook's wit.ai
 # https://wit.ai/docs/http/20141022
 def handle_intent(response):
-    intent = response["outcomes"][0]["intent"]
+    intent = response[0]["intent"]
 
     if intent == "alarm":
         offline_speak("Your alarm has been set")
         return True
 
-    elif intent == "seeedstudio"
+    elif intent == "seeedstudio":
         offline_speak("Seeed Studio is located in Shenzhen, China")
         return True
 
@@ -230,13 +230,14 @@ def wit_ai():
    
         # Check if we got an error
 	if 'error' not in response.keys():
-                print "Wit.ai believe the audio said: ", the["_text"]
+                print "Debug: Wit.ai believe the audio said: ", response["_text"]
 
                 # See if our code handles the specified intent
 		if response["outcomes"][0]["intent"] == "UNKNOWN" or not handle_intent(response["outcomes"]):
                     print "Debug: Unrecognized Wit.ai intent. Let Alexa handle it"
                 else:
 			wit_ai_received = True
+                        print "Debug: Wit.ai handled response ignore response from Alexa"
         else:
             print "Debug: Wit.ai returned an error"
 
@@ -268,6 +269,7 @@ while internet_on() == False:
 
 offline_speak("Hello "+username+", Ask me any question")
 
+print "Debug: Ready to receive request"
 while True:
 	try:
 		# Read from microphone
@@ -292,7 +294,7 @@ while True:
 		inp.close()
 
                 # Open file that will be used to save raw micrphone recording
-		recording_file = open("myfile.pcm", 'w')
+		recording_file = open(filename_raw, 'w')
 		recording_file.truncate()
 
                 # Indicate that the system is listening to request
@@ -317,15 +319,16 @@ while True:
 		print ("Debug: End recording")
 		record_audio = False
 
-                # Close file we are saving microphone data to
+		# Close file we are saving microphone data to
 		recording_file.close()
 
-                # Convert raw PCM to wav file (includes audio headers)
-		os.system("sox -t raw -r 16000 -e signed -b 16 -c 1 myfile.pcm myfile.wav && sync");
+		# Convert raw PCM to wav file (includes audio headers)
+		os.system("sox -t raw -r 16000 -e signed -b 16 -c 1 "+filename_raw+" "+filename+" && sync");
 
-                # Send recording to our speech recognition web services
+		print "Debug: Sending audio to services to be processed"
+		# Send recording to our speech recognition web services
 		web_service()
 
-                # Now that request is handled restart audio decoding
+		# Now that request is handled restart audio decoding
 		decoder.end_utt()
 		decoder.start_utt()
