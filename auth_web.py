@@ -8,6 +8,9 @@ import json
 from creds import *
 import urllib
 
+# This file was taken from AlexaPi
+# https://github.com/sammachin/AlexaPi
+
 class Start(object):
 	def index(self):
 		scope="alexa_all"
